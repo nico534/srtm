@@ -1,4 +1,5 @@
 extern crate byteorder;
+extern crate zip;
 
 use std::fs;
 use std::fs::File;
@@ -7,6 +8,7 @@ use std::io;
 use std::io::{Read, BufReader};
 use std::path::Path;
 use byteorder::{BigEndian, ReadBytesExt};
+use zip::ZipArchive;
 
 #[derive(PartialEq,Eq,Clone,Copy,Debug)]
 pub enum Resolution {
@@ -49,6 +51,18 @@ impl Tile {
         Ok(tile)
     }
 
+    pub fn from_zip_file<P: AsRef<Path>>(path: P) -> Result<Tile, Error> {
+        let (lat, lng) = get_lat_long(&path)?;
+        let res = Resolution::SRTM3;
+        let file = File::open(&path).map_err(|_| Error::Read)?;
+        let mut archive = ZipArchive::new(file).unwrap();
+        let zipfile = archive.by_index(0).unwrap();
+        let reader = BufReader::new(zipfile);
+        let mut tile = Tile::new_empty(lat, lng, res);
+        tile.data = parse(reader, tile.resolution).map_err(|_| Error::Read)?;
+        Ok(tile)
+    }
+
     pub fn extent(&self) -> u32 {
         match self.resolution {
             Resolution::SRTM1 => 3601,
@@ -82,8 +96,11 @@ fn get_resolution<P: AsRef<Path>>(path: P) -> Option<Resolution> {
 // FIXME Better error handling.
 fn get_lat_long<P: AsRef<Path>>(path: P) -> Result<(i32, i32), Error> {
     let stem = path.as_ref().file_stem().ok_or(Error::ParseLatLong)?;
-    let desc = stem.to_str().ok_or(Error::ParseLatLong)?;
-    if desc.len() != 7 {
+    let mut desc = stem.to_str().ok_or(Error::ParseLatLong)?;
+
+    if desc.len() == 11 && desc.ends_with(".hgt") {
+        desc = &desc[0..7];
+    } else if desc.len() != 7 {
         return Err(Error::ParseLatLong);
     }
 
@@ -117,6 +134,7 @@ fn parse<R: Read>(reader: R, res: Resolution) -> io::Result<Vec<i16>> {
 mod tests {
     use std::path::Path;
     use super::get_lat_long;
+    use super::Tile;
 
     #[test]
     fn parse_latitute_and_longitude() {
@@ -131,5 +149,14 @@ mod tests {
 
         let sw = Path::new("S35W138.hgt");
         assert_eq!(get_lat_long(&sw).unwrap(), (-35, -138));
+    }
+    #[test]
+    fn read_zip_file() {
+        let testfile = Path::new("/home/pc/SoftwareProjects/Bachelorarbeit/TestData/N00E072.hgt.zip");
+        let tile = Tile::from_zip_file(testfile);
+        assert_eq!(tile.is_ok(), true);
+        let tile = tile.unwrap();
+        assert_eq!(tile.latitude, 0);
+        assert_eq!(tile.longitude, 72);
     }
 }

@@ -16,4 +16,5 @@ name = "srtm"
 path = "src/lib.rs"
 
 [dependencies]
+zip = "0.6.2"
 byteorder = "1"
